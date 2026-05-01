@@ -1,0 +1,22 @@
+{
+  "name": "pi-multifolder-sandbox",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./pi-gondolin-workspace.ts"],
+    "skills": ["./skills"]
+  },
+  "dependencies": {
+    "@earendil-works/gondolin": "^0.8.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.70.6",
+    "@types/node": "^22.10.7",
+    "typescript": "^5.7.3"
+  }
+}
