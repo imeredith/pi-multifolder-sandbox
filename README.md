@@ -48,6 +48,10 @@ Start Pi with this extension file:
 pi -e /absolute/path/to/pi-gondolin-workspace.ts
 ```
 
+## Custom Gondolin image
+
+See `CUSTOM_IMAGE.md` for building and selecting a custom Gondolin image with a larger root filesystem or extra packages.
+
 ## `.pi-workspace` format
 
 Schema: `https://raw.githubusercontent.com/imeredith/pi-multifolder-sandbox/main/pi-workspace.schema.json`

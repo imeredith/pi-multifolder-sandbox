@@ -47,10 +47,16 @@ import { RealFSProvider, VM } from "@earendil-works/gondolin";
 
 const GUEST_WORKSPACE = "/workspace";
 const CONFIG_FILE = ".pi-workspace";
+const GLOBAL_CONFIG_DIR = path.join(os.homedir(), ".config", "pi-multifolder-sandbox");
+const GLOBAL_CONFIG_FILE = path.join(GLOBAL_CONFIG_DIR, "config.toml");
 
 interface PiWorkspaceConfig {
   mounts: WorkspaceMount[];
   hostCommands: HostCommand[];
+}
+
+interface PiMultifolderConfig {
+  image?: string;
 }
 
 interface WorkspaceMount {
@@ -76,6 +82,39 @@ function loadConfig(localCwd: string): PiWorkspaceConfig {
   } catch (err) {
     throw new Error(`Failed to load ${configPath}: ${err instanceof Error ? err.message : String(err)}`);
   }
+}
+
+function loadGlobalConfig(): PiMultifolderConfig {
+  if (!fs.existsSync(GLOBAL_CONFIG_FILE)) {
+    fs.mkdirSync(GLOBAL_CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(
+      GLOBAL_CONFIG_FILE,
+      [
+        "# Optional Gondolin image asset directory or image selector.",
+        "# Examples:",
+        "# image = \"/Users/ivan/.pi-image.img\"",
+        "# image = \"807272fc-ea12-5693-8123-fedca05f603e\"",
+        "# Leave unset to use Gondolin's default image.",
+        "# image = \"\"",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    return {};
+  }
+
+  try {
+    const raw = fs.readFileSync(GLOBAL_CONFIG_FILE, "utf8");
+    const image = readTomlString(raw, "image")?.trim();
+    return image ? { image: expandHome(image) } : {};
+  } catch (err) {
+    throw new Error(`Failed to load ${GLOBAL_CONFIG_FILE}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function readTomlString(raw: string, key: string): string | undefined {
+  const pattern = new RegExp(`^\\s*${key}\\s*=\\s*([\"'])(.*?)\\1\\s*(?:#.*)?$`, "m");
+  return raw.match(pattern)?.[2];
 }
 
 function normalizeConfig(value: unknown, configPath: string): PiWorkspaceConfig {
@@ -407,6 +446,7 @@ function createGondolinBashOps(vm: VM, localCwd: string, mappers: PathMapper[]):
 export default function (pi: ExtensionAPI) {
   const localCwd = process.cwd();
   const config = loadConfig(localCwd);
+  const globalConfig = loadGlobalConfig();
   const mappers = buildPathMappers(localCwd, config);
 
   const localRead = createReadTool(localCwd);
@@ -441,6 +481,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       const created = await VM.create({
+        ...(globalConfig.image ? { sandbox: { imagePath: globalConfig.image } } : {}),
         vfs: { mounts },
       });
 
