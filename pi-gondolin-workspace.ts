@@ -9,6 +9,10 @@
  *     "mounts": [
  *       { "hostPath": "~/personal/other-project", "mountPath": "/other-project" },
  *       { "hostPath": "/home/user/shared-libs", "mountPath": "/shared-libs" }
+ *     ],
+ *     "hostCommands": [
+ *       "docker",
+ *       { "command": "gh auth", "match": "prefix" }
  *     ]
  *   }
  *
@@ -30,6 +34,7 @@ import type {
 import {
   type BashOperations,
   createBashTool,
+  createLocalBashOperations,
   createEditTool,
   createReadTool,
   createWriteTool,
@@ -45,6 +50,7 @@ const CONFIG_FILE = ".pi-workspace";
 
 interface PiWorkspaceConfig {
   mounts: WorkspaceMount[];
+  hostCommands: HostCommand[];
 }
 
 interface WorkspaceMount {
@@ -52,10 +58,17 @@ interface WorkspaceMount {
   mountPath: string;
 }
 
+type HostCommandMatch = "name" | "prefix" | "exact";
+
+interface HostCommand {
+  command: string;
+  match: HostCommandMatch;
+}
+
 function loadConfig(localCwd: string): PiWorkspaceConfig {
   const configPath = path.join(localCwd, CONFIG_FILE);
   if (!fs.existsSync(configPath)) {
-    return { mounts: [] };
+    return { mounts: [], hostCommands: [] };
   }
   try {
     const raw = fs.readFileSync(configPath, "utf8");
@@ -70,11 +83,17 @@ function normalizeConfig(value: unknown, configPath: string): PiWorkspaceConfig 
     throw new Error("config must be a JSON object");
   }
 
-  const rawMounts = (value as { mounts?: unknown }).mounts;
-  if (rawMounts === undefined) return { mounts: [] };
+  const obj = value as { mounts?: unknown; hostCommands?: unknown; localCommands?: unknown; outsideVmCommands?: unknown };
+  const rawMounts = obj.mounts;
+  const hostCommands = normalizeHostCommands(
+    obj.hostCommands ?? obj.localCommands ?? obj.outsideVmCommands,
+    configPath,
+  );
+  if (rawMounts === undefined) return { mounts: [], hostCommands };
 
   if (Array.isArray(rawMounts)) {
     return {
+      hostCommands,
       mounts: rawMounts.map((entry, index) => {
         if (!entry || typeof entry !== "object") {
           throw new Error(`mounts[${index}] must be an object`);
@@ -94,6 +113,7 @@ function normalizeConfig(value: unknown, configPath: string): PiWorkspaceConfig 
 
   if (typeof rawMounts === "object" && rawMounts !== null) {
     return {
+      hostCommands,
       mounts: Object.entries(rawMounts as Record<string, unknown>).map(([hostPath, mountPath]) => {
         if (typeof mountPath !== "string" || mountPath.length === 0) {
           throw new Error(`mount path for ${hostPath} must be a non-empty string`);
@@ -104,6 +124,44 @@ function normalizeConfig(value: unknown, configPath: string): PiWorkspaceConfig 
   }
 
   throw new Error("mounts must be either an object map or an array");
+}
+
+function normalizeHostCommands(rawCommands: unknown, configPath: string): HostCommand[] {
+  if (rawCommands === undefined) return [];
+  if (!Array.isArray(rawCommands)) {
+    throw new Error("hostCommands must be an array");
+  }
+
+  return rawCommands.map((entry, index) => {
+    if (typeof entry === "string") {
+      if (entry.trim().length === 0) {
+        throw new Error(`hostCommands[${index}] must be a non-empty string`);
+      }
+      const command = entry.trim();
+      return {
+        command,
+        match: /\s/.test(command) ? "prefix" : "name",
+      };
+    }
+
+    if (!entry || typeof entry !== "object") {
+      throw new Error(`hostCommands[${index}] must be a string or object`);
+    }
+
+    const hostCommand = entry as { command?: unknown; match?: unknown };
+    if (typeof hostCommand.command !== "string" || hostCommand.command.trim().length === 0) {
+      throw new Error(`hostCommands[${index}].command must be a non-empty string`);
+    }
+
+    const match = hostCommand.match ?? (
+      /\s/.test(hostCommand.command.trim()) ? "prefix" : "name"
+    );
+    if (match !== "name" && match !== "prefix" && match !== "exact") {
+      throw new Error(`${configPath}: hostCommands[${index}].match must be "name", "prefix", or "exact"`);
+    }
+
+    return { command: hostCommand.command.trim(), match };
+  });
 }
 
 function validateMount(mount: WorkspaceMount, configPath: string): WorkspaceMount {
@@ -262,6 +320,45 @@ function sanitizeEnv(
   return out;
 }
 
+function firstShellWord(command: string): string {
+  const trimmed = command.trim();
+  const match = trimmed.match(/^(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*(?:command\s+|builtin\s+|exec\s+)?([^\s;&|()<>]+)/);
+  return match?.[1] ?? "";
+}
+
+function shouldRunOnHost(command: string, hostCommands: HostCommand[]): HostCommand | undefined {
+  const trimmed = command.trim();
+  const firstWord = firstShellWord(trimmed);
+
+  return hostCommands.find((hostCommand) => {
+    if (hostCommand.match === "exact") return trimmed === hostCommand.command;
+    if (hostCommand.match === "prefix") {
+      return trimmed === hostCommand.command || trimmed.startsWith(`${hostCommand.command} `);
+    }
+    return firstWord === hostCommand.command;
+  });
+}
+
+function createHybridBashOps(
+  vm: VM,
+  localCwd: string,
+  mappers: PathMapper[],
+  hostCommands: HostCommand[],
+): BashOperations {
+  const hostOps = createLocalBashOperations();
+  const vmOps = createGondolinBashOps(vm, localCwd, mappers);
+
+  return {
+    exec: async (command, cwd, options) => {
+      const hostCommand = shouldRunOnHost(command, hostCommands);
+      if (!hostCommand) return vmOps.exec(command, cwd, options);
+
+      options.onData(Buffer.from(`[running on host: ${hostCommand.command}]\n`));
+      return hostOps.exec(command, cwd, options);
+    },
+  };
+}
+
 function createGondolinBashOps(vm: VM, localCwd: string, mappers: PathMapper[]): BashOperations {
   return {
     exec: async (command, cwd, { onData, signal, timeout, env }) => {
@@ -418,7 +515,7 @@ export default function (pi: ExtensionAPI) {
     async execute(id, params, signal, onUpdate, ctx) {
       const activeVm = await ensureVm(ctx);
       const tool = createBashTool(localCwd, {
-        operations: createGondolinBashOps(activeVm, localCwd, mappers),
+        operations: createHybridBashOps(activeVm, localCwd, mappers, config.hostCommands),
       });
       return tool.execute(id, params, signal, onUpdate);
     },
@@ -426,7 +523,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("user_bash", (_event, ctx) => {
     if (!vm) return;
-    return { operations: createGondolinBashOps(vm, localCwd, mappers) };
+    return { operations: createHybridBashOps(vm, localCwd, mappers, config.hostCommands) };
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
@@ -437,10 +534,15 @@ export default function (pi: ExtensionAPI) {
       mounts.push(`${mountPath} (mounted from ${resolvedHost})`);
     }
     const mountInfo = mounts.join("\n- ");
+    const hostCommandInfo = config.hostCommands.length > 0
+      ? `\n\nHost commands (run outside the VM): ${config.hostCommands
+          .map(({ command, match }) => `${command} (${match})`)
+          .join(", ")}`
+      : "";
 
     const modified = event.systemPrompt.replace(
       `Current working directory: ${localCwd}`,
-      `Current working directory: /workspace (Gondolin VM)\n\nMounted directories:\n- ${mountInfo}`,
+      `Current working directory: /workspace (Gondolin VM)\n\nMounted directories:\n- ${mountInfo}${hostCommandInfo}`,
     );
     return { systemPrompt: modified };
   });

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/imeredith/pi-multifolder-sandbox/main/pi-workspace.schema.json",
+  "mounts": [
+    {
+      "hostPath": "~/personal/frontend",
+      "mountPath": "/frontend"
+    },
+    {
+      "hostPath": "/Users/me/personal/shared-packages",
+      "mountPath": "/shared-packages"
+    }
+  ],
+  "hostCommands": [
+    "docker",
+    {
+      "command": "docker compose",
+      "match": "prefix"
+    },
+    {
+      "command": "gh auth status",
+      "match": "exact"
+    }
+  ]
+}

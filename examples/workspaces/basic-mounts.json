@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/imeredith/pi-multifolder-sandbox/main/pi-workspace.schema.json",
+  "mounts": [
+    {
+      "hostPath": "~/personal/other-project",
+      "mountPath": "/other-project"
+    },
+    {
+      "hostPath": "../shared-libs",
+      "mountPath": "/shared-libs"
+    }
+  ]
+}

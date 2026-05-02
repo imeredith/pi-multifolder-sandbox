@@ -1,0 +1,7 @@
+{
+  "$schema": "https://raw.githubusercontent.com/imeredith/pi-multifolder-sandbox/main/pi-workspace.schema.json",
+  "mounts": {
+    "~/personal/api": "/api",
+    "../design-system": "/design-system"
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/imeredith/pi-multifolder-sandbox/main/pi-workspace.schema.json",
+  "title": "Pi Gondolin Workspace Configuration",
+  "description": "Configuration for additional Gondolin VM mounts and explicit host-side commands.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional JSON schema URL for editor validation."
+    },
+    "mounts": {
+      "description": "Additional host directories to mount into the Gondolin VM. /workspace is mounted automatically and must not be configured here.",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/workspaceMount"
+          },
+          "uniqueItems": true
+        },
+        {
+          "type": "object",
+          "description": "Object map of host paths to guest mount paths.",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/absoluteGuestPath"
+          }
+        }
+      ]
+    },
+    "hostCommands": {
+      "$ref": "#/$defs/hostCommandList",
+      "description": "Explicit commands that may run on the host outside the Gondolin VM/container."
+    },
+    "localCommands": {
+      "$ref": "#/$defs/hostCommandList",
+      "description": "Alias for hostCommands. Prefer hostCommands for new configs."
+    },
+    "outsideVmCommands": {
+      "$ref": "#/$defs/hostCommandList",
+      "description": "Alias for hostCommands. Prefer hostCommands for new configs."
+    }
+  },
+  "$defs": {
+    "absoluteGuestPath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^/(?!workspace(?:/|$)).+",
+      "description": "Absolute POSIX path inside the VM. /workspace is reserved and mounted automatically."
+    },
+    "workspaceMount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hostPath"
+      ],
+      "properties": {
+        "hostPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Host path. May be absolute, start with ~/, or be relative to the project root."
+        },
+        "mountPath": {
+          "$ref": "#/$defs/absoluteGuestPath"
+        },
+        "guestPath": {
+          "$ref": "#/$defs/absoluteGuestPath",
+          "description": "Backward-compatible alias for mountPath. Prefer mountPath."
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "mountPath"
+          ],
+          "not": {
+            "required": [
+              "guestPath"
+            ]
+          }
+        },
+        {
+          "required": [
+            "guestPath"
+          ],
+          "not": {
+            "required": [
+              "mountPath"
+            ]
+          }
+        }
+      ]
+    },
+    "hostCommandList": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          {
+            "$ref": "#/$defs/hostCommand"
+          }
+        ]
+      },
+      "uniqueItems": true
+    },
+    "hostCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "Command or command prefix to run on the host."
+        },
+        "match": {
+          "type": "string",
+          "enum": [
+            "name",
+            "prefix",
+            "exact"
+          ],
+          "description": "name: first shell word, prefix: command starts with this value, exact: full command equals this value."
+        }
+      }
+    }
+  }
+}

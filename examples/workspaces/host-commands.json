@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/imeredith/pi-multifolder-sandbox/main/pi-workspace.schema.json",
+  "hostCommands": [
+    "docker",
+    "open",
+    {
+      "command": "gh auth",
+      "match": "prefix"
+    },
+    {
+      "command": "security find-generic-password",
+      "match": "prefix"
+    }
+  ]
+}
